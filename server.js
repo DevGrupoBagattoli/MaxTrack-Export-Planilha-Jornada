@@ -3,7 +3,8 @@ import { login, listProcesses, exportJourney, findProcessByNameAndDate } from '.
 const PORT = process.env.PORT || 3000;
 const PROCESS_NAME = "Planilha de Jornadas V2";
 const POLL_INTERVAL_MS = 5000; // 5 seconds
-const MAX_POLL_TIME_MS = 5 * 60 * 1000; // 5 minutes
+const INITIAL_DELAY_MS = 3000; // Wait 3 seconds before first poll
+const MAX_POLL_TIME_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
  * Get yesterday's date range in ISO format with timezone
@@ -38,24 +39,43 @@ function getYesterdayDateRange() {
  */
 async function pollForCompletion(authData, startTimestamp, endTimestamp) {
   const startTime = Date.now();
+  let pollCount = 0;
+  
+  // Initial delay to allow process creation in MaxTrack
+  console.log(`⏳ Waiting ${INITIAL_DELAY_MS}ms before first poll...`);
+  await new Promise(resolve => setTimeout(resolve, INITIAL_DELAY_MS));
   
   while (Date.now() - startTime < MAX_POLL_TIME_MS) {
-    // Wait before checking
-    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+    pollCount++;
+    const elapsedMinutes = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
     
     // Get process list
     const result = await listProcesses(authData);
+    
+    // Debug: Log all recent processes on first poll
+    if (pollCount === 1 && result.list.length > 0) {
+      console.log(`📋 Found ${result.list.length} total processes. Recent ones:`);
+      result.list.slice(0, 5).forEach(p => {
+        const pDate = new Date(p.createDate);
+        console.log(`  - "${p.name}" | State: ${p.state?.id || p.status?.state?.id} | Created: ${pDate.toISOString()}`);
+      });
+      console.log(`🎯 Looking for: "${PROCESS_NAME}" between ${new Date(startTimestamp).toISOString()} and ${new Date(endTimestamp).toISOString()}`);
+    }
     
     // Find matching process
     const process = findProcessByNameAndDate(result.list, PROCESS_NAME, startTimestamp, endTimestamp);
     
     if (!process) {
-      continue; // Keep polling
+      console.log(`🔍 Poll #${pollCount} (${elapsedMinutes}min): Process not found yet, continuing...`);
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+      continue;
     }
     
     const state = process.state?.id || process.status?.state?.id;
+    console.log(`🔍 Poll #${pollCount} (${elapsedMinutes}min): Process found with state: ${state}`);
     
     if (state === 'COMPLETED') {
+      console.log(`✅ Process completed after ${elapsedMinutes} minutes`);
       return process;
     }
     
@@ -64,9 +84,10 @@ async function pollForCompletion(authData, startTimestamp, endTimestamp) {
     }
     
     // States: SCHEDULED, WAITING, PROCESSING - keep polling
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
   }
   
-  throw new Error('Polling timeout: Process did not complete within 5 minutes');
+  throw new Error('Polling timeout: Process did not complete within 10 minutes');
 }
 
 /**
@@ -90,16 +111,21 @@ async function handleJourneyExport(requestBody) {
     // Step 1: Authenticate
     const authData = await login(email, password);
     
-    // Step 2: Get yesterday's date range
+    // Step 2: Get yesterday's date range (for the data export)
     const { startDate, endDate, startTimestamp, endTimestamp } = getYesterdayDateRange();
     
-    // Step 3: Check if process already exists for yesterday
+    // Create a timestamp range for finding the PROCESS (created today)
+    // Processes are created when we make the request, so we look for processes created in the last 2 hours
+    const processSearchStart = Date.now() - (2 * 60 * 60 * 1000); // 2 hours ago
+    const processSearchEnd = Date.now() + (5 * 60 * 1000); // 5 minutes in future to account for clock skew
+    
+    // Step 3: Check if process already exists (created recently for yesterday's data)
     const processListResult = await listProcesses(authData);
     const existingProcess = findProcessByNameAndDate(
       processListResult.list, 
       PROCESS_NAME, 
-      startTimestamp, 
-      endTimestamp
+      processSearchStart, 
+      processSearchEnd
     );
     
     // Step 4: If exists and completed, return immediately
@@ -119,7 +145,7 @@ async function handleJourneyExport(requestBody) {
       
       // If exists but not completed, poll for completion
       if (state === 'SCHEDULED' || state === 'WAITING' || state === 'PROCESSING') {
-        const completedProcess = await pollForCompletion(authData, startTimestamp, endTimestamp);
+        const completedProcess = await pollForCompletion(authData, processSearchStart, processSearchEnd);
         const url = completedProcess.resultFileUrl || completedProcess.status?.resultFileUrl;
         
         return {
@@ -136,7 +162,7 @@ async function handleJourneyExport(requestBody) {
     await exportJourney(authData, startDate, endDate);
     
     // Step 6: Poll until completion
-    const completedProcess = await pollForCompletion(authData, startTimestamp, endTimestamp);
+    const completedProcess = await pollForCompletion(authData, processSearchStart, processSearchEnd);
     const url = completedProcess.resultFileUrl || completedProcess.status?.resultFileUrl;
     
     return {
