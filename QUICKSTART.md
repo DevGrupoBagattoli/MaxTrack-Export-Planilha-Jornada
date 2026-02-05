@@ -52,9 +52,9 @@ docker-compose down
 curl http://localhost:3000/health
 
 # Get yesterday's journey export
-curl -X POST http://localhost:3000/api/journey-export \
-  -H "Content-Type: application/json" \
-  -d '{"email":"your-email@example.com","password":"your-password"}'
+curl http://localhost:3000/api/journey-export \
+  -H "email: your-email@example.com" \
+  -H "password: your-password"
 ```
 
 ## 📝 Example Response

@@ -21,9 +21,7 @@ echo ""
 
 # Test 2: Missing credentials
 echo "2️⃣  Testing validation (missing credentials)..."
-VALIDATION=$(curl -s -X POST "$BASE_URL/api/journey-export" \
-    -H "Content-Type: application/json" \
-    -d '{}')
+VALIDATION=$(curl -s "$BASE_URL/api/journey-export")
 if echo "$VALIDATION" | grep -q '"error":"Email and password are required"'; then
     echo "✅ Validation passed: $VALIDATION"
 else
@@ -34,9 +32,9 @@ echo ""
 
 # Test 3: Invalid credentials
 echo "3️⃣  Testing authentication (invalid credentials)..."
-AUTH=$(curl -s -X POST "$BASE_URL/api/journey-export" \
-    -H "Content-Type: application/json" \
-    -d '{"email":"wrong@email.com","password":"wrong"}')
+AUTH=$(curl -s "$BASE_URL/api/journey-export" \
+    -H "email: wrong@email.com" \
+    -H "password: wrong")
 if echo "$AUTH" | grep -q '"error":"Authentication failed'; then
     echo "✅ Authentication error handled: Rejected invalid credentials"
 else
@@ -58,9 +56,9 @@ echo ""
 # Test 5: Real request (optional - requires valid credentials)
 if [ ! -z "$TEST_EMAIL" ] && [ ! -z "$TEST_PASSWORD" ]; then
     echo "5️⃣  Testing real API request..."
-    RESULT=$(curl -s -X POST "$BASE_URL/api/journey-export" \
-        -H "Content-Type: application/json" \
-        -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASSWORD\"}")
+    RESULT=$(curl -s "$BASE_URL/api/journey-export" \
+        -H "email: $TEST_EMAIL" \
+        -H "password: $TEST_PASSWORD")
     
     if echo "$RESULT" | grep -q '"success":true'; then
         URL=$(echo "$RESULT" | grep -o '"url":"[^"]*"' | cut -d'"' -f4)

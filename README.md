@@ -25,17 +25,13 @@ The API follows this workflow:
 
 ## API Endpoints
 
-### `POST /api/journey-export`
+### `GET /api/journey-export`
 
 Main endpoint to retrieve yesterday's journey export.
 
-**Request Body:**
-```json
-{
-  "email": "your-email@example.com",
-  "password": "your-password"
-}
-```
+**Request Headers:**
+- `email`: Your MaxTrack email address
+- `password`: Your MaxTrack password
 
 **Success Response (200):**
 ```json
@@ -93,9 +89,9 @@ Health check endpoint for monitoring.
 
 4. **Test the endpoint:**
    ```bash
-   curl -X POST http://localhost:3000/api/journey-export \
-     -H "Content-Type: application/json" \
-     -d '{"email":"your-email@example.com","password":"your-password"}'
+   curl http://localhost:3000/api/journey-export \
+     -H "email: your-email@example.com" \
+     -H "password: your-password"
    ```
 
 ### Docker Deployment
@@ -149,14 +145,12 @@ To consume this API in PowerBI:
 
 1. Use **Web Connector** as data source
 2. Set URL to: `http://your-server:3000/api/journey-export`
-3. Use **POST** method
-4. Add headers: `Content-Type: application/json`
-5. Set body with your credentials:
-   ```json
-   {"email":"your-email","password":"your-password"}
-   ```
-6. Parse the JSON response and extract the `url` field
-7. Use that URL to fetch the actual Excel file data
+3. Use **GET** method
+4. Add headers:
+   - `email`: your MaxTrack email
+   - `password`: your MaxTrack password
+5. Parse the JSON response and extract the `url` field
+6. Use that URL to fetch the actual Excel file data
 
 ## Configuration
 
@@ -192,7 +186,7 @@ To consume this API in PowerBI:
 
 The API handles various error scenarios:
 
-- **400 Bad Request:** Missing email/password or invalid JSON
+- **400 Bad Request:** Missing email/password headers
 - **401 Unauthorized:** Invalid MaxTrack credentials
 - **404 Not Found:** Invalid endpoint
 - **500 Internal Server Error:** API failures, timeouts, or process errors

@@ -92,12 +92,11 @@ async function pollForCompletion(authData, startTimestamp, endTimestamp) {
 
 /**
  * Main handler for journey export endpoint
- * @param {Object} requestBody - Request body with email and password
+ * @param {string} email - User email
+ * @param {string} password - User password
  * @returns {Promise<Object>} Response object
  */
-async function handleJourneyExport(requestBody) {
-  const { email, password } = requestBody;
-  
+async function handleJourneyExport(email, password) {
   // Validate request
   if (!email || !password) {
     return {
@@ -208,10 +207,12 @@ async function handleRequest(req) {
   }
   
   // Main export endpoint
-  if (url.pathname === '/api/journey-export' && req.method === 'POST') {
+  if (url.pathname === '/api/journey-export' && req.method === 'GET') {
     try {
-      const body = await req.json();
-      const result = await handleJourneyExport(body);
+      const email = req.headers.get('email');
+      const password = req.headers.get('password');
+      
+      const result = await handleJourneyExport(email, password);
       
       const { statusCode, ...responseData } = result;
       
@@ -222,9 +223,9 @@ async function handleRequest(req) {
     } catch (error) {
       return new Response(JSON.stringify({
         success: false,
-        error: 'Invalid request body'
+        error: 'Internal server error'
       }), {
-        status: 400,
+        status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
@@ -248,4 +249,5 @@ const server = Bun.serve({
 
 console.log(`🚀 MaxTrack Export API running on http://localhost:${server.port}`);
 console.log(`📊 Health check: http://localhost:${server.port}/health`);
-console.log(`📤 Export endpoint: POST http://localhost:${server.port}/api/journey-export`);
+console.log(`📤 Export endpoint: GET http://localhost:${server.port}/api/journey-export`);
+console.log(`   Headers required: email, password`);
