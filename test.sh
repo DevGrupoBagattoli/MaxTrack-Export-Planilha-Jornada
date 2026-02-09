@@ -55,18 +55,20 @@ echo ""
 
 # Test 5: Real request (optional - requires valid credentials)
 if [ ! -z "$TEST_EMAIL" ] && [ ! -z "$TEST_PASSWORD" ]; then
-    echo "5️⃣  Testing real API request..."
-    RESULT=$(curl -s "$BASE_URL/api/journey-export" \
+    echo "5️⃣  Testing real API request (downloading file)..."
+    HTTP_CODE=$(curl -s -o /tmp/maxtrack-export-test.xls -w '%{http_code}' "$BASE_URL/api/journey-export" \
         -H "email: $TEST_EMAIL" \
         -H "password: $TEST_PASSWORD")
     
-    if echo "$RESULT" | grep -q '"success":true'; then
-        URL=$(echo "$RESULT" | grep -o '"url":"[^"]*"' | cut -d'"' -f4)
+    if [ "$HTTP_CODE" = "200" ]; then
+        FILE_SIZE=$(wc -c < /tmp/maxtrack-export-test.xls)
         echo "✅ Real request succeeded!"
-        echo "   Process ID: $(echo "$RESULT" | grep -o '"processId":[0-9]*' | cut -d':' -f2)"
-        echo "   URL: ${URL:0:80}..."
+        echo "   HTTP Status: $HTTP_CODE"
+        echo "   File size: $FILE_SIZE bytes"
+        echo "   Saved to: /tmp/maxtrack-export-test.xls"
     else
-        echo "⚠️  Real request failed (this may be expected): $RESULT"
+        BODY=$(cat /tmp/maxtrack-export-test.xls)
+        echo "⚠️  Real request failed (HTTP $HTTP_CODE): $BODY"
     fi
     echo ""
 fi

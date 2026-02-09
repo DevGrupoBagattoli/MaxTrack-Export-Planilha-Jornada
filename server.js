@@ -91,104 +91,131 @@ async function pollForCompletion(authData, startTimestamp, endTimestamp) {
 }
 
 /**
- * Main handler for journey export endpoint
+ * Resolve the file URL for yesterday's journey export
+ * @param {Object} authData - Authentication data
+ * @returns {Promise<string>} The S3 file URL
+ */
+async function resolveExportUrl(authData) {
+  // Get yesterday's date range (for the data export)
+  const { startDate, endDate } = getYesterdayDateRange();
+
+  // Create a timestamp range for finding the PROCESS (created today)
+  const processSearchStart = Date.now() - (2 * 60 * 60 * 1000); // 2 hours ago
+  const processSearchEnd = Date.now() + (5 * 60 * 1000); // 5 minutes in future to account for clock skew
+
+  // Check if process already exists (created recently for yesterday's data)
+  const processListResult = await listProcesses(authData);
+  const existingProcess = findProcessByNameAndDate(
+    processListResult.list,
+    PROCESS_NAME,
+    processSearchStart,
+    processSearchEnd
+  );
+
+  if (existingProcess) {
+    const state = existingProcess.state?.id || existingProcess.status?.state?.id;
+
+    if (state === 'COMPLETED') {
+      return existingProcess.resultFileUrl || existingProcess.status?.resultFileUrl;
+    }
+
+    // If exists but not completed, poll for completion
+    if (state === 'SCHEDULED' || state === 'WAITING' || state === 'PROCESSING') {
+      const completedProcess = await pollForCompletion(authData, processSearchStart, processSearchEnd);
+      return completedProcess.resultFileUrl || completedProcess.status?.resultFileUrl;
+    }
+  }
+
+  // Trigger new export for yesterday
+  await exportJourney(authData, startDate, endDate);
+
+  // Poll until completion
+  const completedProcess = await pollForCompletion(authData, processSearchStart, processSearchEnd);
+  return completedProcess.resultFileUrl || completedProcess.status?.resultFileUrl;
+}
+
+/**
+ * Main handler for journey export endpoint.
+ * Resolves the export, downloads the file from the S3 URL and returns the
+ * binary content so PowerBI Cloud can consume it as a static source.
  * @param {string} email - User email
  * @param {string} password - User password
- * @returns {Promise<Object>} Response object
+ * @returns {Promise<Response>} HTTP response (binary file or JSON error)
  */
 async function handleJourneyExport(email, password) {
   // Validate request
   if (!email || !password) {
-    return {
+    return new Response(JSON.stringify({
       success: false,
-      error: 'Email and password are required',
-      statusCode: 400
-    };
+      error: 'Email and password are required'
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
-  
+
   try {
     // Step 1: Authenticate
     const authData = await login(email, password);
-    
-    // Step 2: Get yesterday's date range (for the data export)
-    const { startDate, endDate, startTimestamp, endTimestamp } = getYesterdayDateRange();
-    
-    // Create a timestamp range for finding the PROCESS (created today)
-    // Processes are created when we make the request, so we look for processes created in the last 2 hours
-    const processSearchStart = Date.now() - (2 * 60 * 60 * 1000); // 2 hours ago
-    const processSearchEnd = Date.now() + (5 * 60 * 1000); // 5 minutes in future to account for clock skew
-    
-    // Step 3: Check if process already exists (created recently for yesterday's data)
-    const processListResult = await listProcesses(authData);
-    const existingProcess = findProcessByNameAndDate(
-      processListResult.list, 
-      PROCESS_NAME, 
-      processSearchStart, 
-      processSearchEnd
-    );
-    
-    // Step 4: If exists and completed, return immediately
-    if (existingProcess) {
-      const state = existingProcess.state?.id || existingProcess.status?.state?.id;
-      
-      if (state === 'COMPLETED') {
-        const url = existingProcess.resultFileUrl || existingProcess.status?.resultFileUrl;
-        return {
-          success: true,
-          url,
-          processId: existingProcess.id,
-          processName: existingProcess.name,
-          statusCode: 200
-        };
-      }
-      
-      // If exists but not completed, poll for completion
-      if (state === 'SCHEDULED' || state === 'WAITING' || state === 'PROCESSING') {
-        const completedProcess = await pollForCompletion(authData, processSearchStart, processSearchEnd);
-        const url = completedProcess.resultFileUrl || completedProcess.status?.resultFileUrl;
-        
-        return {
-          success: true,
-          url,
-          processId: completedProcess.id,
-          processName: completedProcess.name,
-          statusCode: 200
-        };
-      }
+
+    // Step 2: Resolve the export file URL
+    const fileUrl = await resolveExportUrl(authData);
+
+    if (!fileUrl) {
+      throw new Error('Export completed but no file URL was returned');
     }
-    
-    // Step 5: Trigger new export for yesterday
-    await exportJourney(authData, startDate, endDate);
-    
-    // Step 6: Poll until completion
-    const completedProcess = await pollForCompletion(authData, processSearchStart, processSearchEnd);
-    const url = completedProcess.resultFileUrl || completedProcess.status?.resultFileUrl;
-    
-    return {
-      success: true,
-      url,
-      processId: completedProcess.id,
-      processName: completedProcess.name,
-      statusCode: 200
+
+    // Step 3: Download the file from S3
+    console.log(`⬇️  Downloading file from: ${fileUrl}`);
+    const fileResponse = await fetch(fileUrl);
+
+    if (!fileResponse.ok) {
+      throw new Error(`Failed to download file: ${fileResponse.status} ${fileResponse.statusText}`);
+    }
+
+    // Derive a filename from the URL or use a default
+    const urlPath = new URL(fileUrl).pathname;
+    const filename = urlPath.split('/').pop() || 'jornada-export.xls';
+
+    // Forward content-type from S3 or default to Excel
+    const contentType = fileResponse.headers.get('content-type') || 'application/vnd.ms-excel';
+    const contentLength = fileResponse.headers.get('content-length');
+
+    console.log(`✅ Streaming file: ${filename} (${contentType}, ${contentLength ?? 'unknown'} bytes)`);
+
+    const headers = {
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${filename}"`,
     };
-    
+    if (contentLength) {
+      headers['Content-Length'] = contentLength;
+    }
+
+    return new Response(fileResponse.body, {
+      status: 200,
+      headers
+    });
+
   } catch (error) {
     console.error('Error in journey export:', error);
-    
-    // Check if it's an authentication error
+
     if (error.message.includes('Login failed')) {
-      return {
+      return new Response(JSON.stringify({
         success: false,
-        error: 'Authentication failed: Invalid credentials',
-        statusCode: 401
-      };
+        error: 'Authentication failed: Invalid credentials'
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
-    
-    return {
+
+    return new Response(JSON.stringify({
       success: false,
-      error: error.message,
-      statusCode: 500
-    };
+      error: error.message
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }
 
@@ -206,29 +233,11 @@ async function handleRequest(req) {
     });
   }
   
-  // Main export endpoint
+  // Main export endpoint — returns the file binary directly
   if (url.pathname === '/api/journey-export' && req.method === 'GET') {
-    try {
-      const email = req.headers.get('email');
-      const password = req.headers.get('password');
-      
-      const result = await handleJourneyExport(email, password);
-      
-      const { statusCode, ...responseData } = result;
-      
-      return new Response(JSON.stringify(responseData), {
-        status: statusCode,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    } catch (error) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'Internal server error'
-      }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const email = req.headers.get('email');
+    const password = req.headers.get('password');
+    return handleJourneyExport(email, password);
   }
   
   // 404 for other routes

@@ -6,22 +6,23 @@ A lightweight REST API microservice that integrates with MaxTrack to retrieve ye
 
 - 🚀 Built with **Bun** native server (zero dependencies)
 - 🔒 Accepts credentials via API request (no stored credentials)
-- 📊 Returns yesterday's journey export URL for PowerBI
+- 📊 Streams yesterday's journey export file directly (binary)
 - ⚡ Automatic process polling and export triggering
 - 🐳 Docker-ready for easy deployment
 - 💾 Minimal footprint (~70MB Docker image)
+- 🔗 Fixed URL for PowerBI Cloud (no dynamic data source issues)
 
 ## Architecture
 
 The API follows this workflow:
 
-1. Accepts MaxTrack credentials via POST request
+1. Accepts MaxTrack credentials via request headers
 2. Authenticates with MaxTrack API
 3. Checks for existing "Planilha de Jornadas V2" export from yesterday
-4. If found and completed, returns the result URL immediately
+4. If found and completed, downloads the file from S3
 5. If not found, triggers a new export for yesterday's data
-6. Polls the process status until completion (max 5 minutes)
-7. Returns structured JSON with the S3 file URL
+6. Polls the process status until completion (max 10 minutes)
+7. Streams the Excel file binary directly to the client
 
 ## API Endpoints
 
@@ -34,16 +35,15 @@ Main endpoint to retrieve yesterday's journey export.
 - `password`: Your MaxTrack password
 
 **Success Response (200):**
-```json
-{
-  "success": true,
-  "url": "https://media-files-denox.s3.amazonaws.com/...",
-  "processId": 1442904,
-  "processName": "Planilha de Jornadas V2"
-}
-```
 
-**Error Response (401/500):**
+The response body is the **raw Excel file binary** (streamed directly from S3).
+
+| Header | Example Value |
+|--------|---------------|
+| `Content-Type` | `application/vnd.ms-excel` |
+| `Content-Disposition` | `attachment; filename="export.xls"` |
+
+**Error Response (400/401/500):**
 ```json
 {
   "success": false,
@@ -89,7 +89,7 @@ Health check endpoint for monitoring.
 
 4. **Test the endpoint:**
    ```bash
-   curl http://localhost:3000/api/journey-export \
+   curl -o export.xls http://localhost:3000/api/journey-export \
      -H "email: your-email@example.com" \
      -H "password: your-password"
    ```
@@ -141,6 +141,8 @@ For production servers:
 
 ## PowerBI Integration
 
+The API streams the Excel file directly, so PowerBI sees a **fixed, static URL** — no dynamic S3 URLs that would be blocked by PowerBI Cloud.
+
 To consume this API in PowerBI:
 
 1. Use **Web Connector** as data source
@@ -149,8 +151,7 @@ To consume this API in PowerBI:
 4. Add headers:
    - `email`: your MaxTrack email
    - `password`: your MaxTrack password
-5. Parse the JSON response and extract the `url` field
-6. Use that URL to fetch the actual Excel file data
+5. PowerBI will receive the Excel file directly and can parse it as a table
 
 ## Configuration
 
@@ -165,7 +166,7 @@ To consume this API in PowerBI:
 | Setting | Value | Location |
 |---------|-------|----------|
 | Poll Interval | 5 seconds | `server.js:6` |
-| Max Poll Time | 5 minutes | `server.js:7` |
+| Max Poll Time | 10 minutes | `server.js:7` |
 | Process Page Size | 100 | `api.js:59` |
 
 ## Project Structure
@@ -198,6 +199,7 @@ The API handles various error scenarios:
 - Date filtering uses yesterday (00:00:00 to 23:59:59 in local timezone)
 - Most recent process is returned if multiple matches exist
 - Export format is hardcoded to `SUMMARY-XLS`
+- The API downloads the file from S3 and streams it to the client, so the URL never changes from PowerBI's perspective
 
 ## Troubleshooting
 

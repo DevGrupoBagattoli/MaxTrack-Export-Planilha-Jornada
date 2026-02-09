@@ -51,25 +51,17 @@ docker-compose down
 # Health check
 curl http://localhost:3000/health
 
-# Get yesterday's journey export
-curl http://localhost:3000/api/journey-export \
+# Download yesterday's journey export (saves as .xls file)
+curl -o export.xls http://localhost:3000/api/journey-export \
   -H "email: your-email@example.com" \
   -H "password: your-password"
 ```
 
 ## 📝 Example Response
 
-Success:
-```json
-{
-  "success": true,
-  "url": "https://media-files-denox.s3.amazonaws.com/go/pm/...",
-  "processId": 1442904,
-  "processName": "Planilha de Jornadas V2"
-}
-```
+Success: The API returns the **raw Excel file binary** directly. Use `curl -o export.xls` to save it.
 
-Error:
+Error (JSON):
 ```json
 {
   "success": false,
@@ -95,7 +87,7 @@ docker run --rm oven/bun:1-alpine bun --version
 ```
 
 **API returns timeout:**
-- Increase `MAX_POLL_TIME_MS` in server.js (currently 5 minutes)
+- Increase `MAX_POLL_TIME_MS` in server.js (currently 10 minutes)
 - Check network connectivity to MaxTrack API
 ```
 
