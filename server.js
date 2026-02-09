@@ -174,8 +174,8 @@ async function handleJourneyExport(email, password) {
     }
 
     // Derive a filename from the URL or use a default
-    const urlPath = new URL(fileUrl).pathname;
-    const filename = urlPath.split('/').pop() || 'jornada-export.xls';
+    //const urlPath = new URL(fileUrl).pathname;
+    const filename = 'jornada-export.xls';
 
     // Forward content-type from S3 or default to Excel
     const contentType = fileResponse.headers.get('content-type') || 'application/vnd.ms-excel';
