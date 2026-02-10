@@ -1,10 +1,22 @@
 import { login, listProcesses, exportJourney, findProcessByNameAndDate } from './api.js';
+import crypto from 'crypto';
 
 const PORT = process.env.PORT || 3000;
 const PROCESS_NAME = "Planilha de Jornadas V2";
 const POLL_INTERVAL_MS = 5000; // 5 seconds
 const INITIAL_DELAY_MS = 3000; // Wait 3 seconds before first poll
 const MAX_POLL_TIME_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Calculate hash of buffer
+ * @param {Buffer|ArrayBuffer} data - Data to hash
+ * @param {string} algorithm - Hash algorithm (md5, sha256)
+ * @returns {string} Hex hash
+ */
+function calculateHash(data, algorithm = 'sha256') {
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  return crypto.createHash(algorithm).update(buffer).digest('hex');
+}
 
 /**
  * Get yesterday's date range in ISO format with timezone
@@ -150,7 +162,7 @@ async function handleJourneyExport(email, password) {
       success: false,
       error: 'Email and password are required'
     }), {
-      status: 400,
+      status: 401,
       headers: { 'Content-Type': 'application/json' }
     });
   }
@@ -174,25 +186,35 @@ async function handleJourneyExport(email, password) {
       throw new Error(`Failed to download file: ${fileResponse.status} ${fileResponse.statusText}`);
     }
 
+    // Read file as buffer to calculate hash and size
+    const fileBuffer = await fileResponse.arrayBuffer();
+    const fileSize = fileBuffer.byteLength;
+    
+    // Calculate file hashes
+    const md5Hash = calculateHash(fileBuffer, 'md5');
+    const sha256Hash = calculateHash(fileBuffer, 'sha256');
+    
+    console.log(`📦 File size: ${fileSize} bytes (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`🔐 File MD5: ${md5Hash}`);
+    console.log(`🔐 File SHA256: ${sha256Hash}`);
+
     // Derive a filename from the URL or use a default
-    //const urlPath = new URL(fileUrl).pathname;
     const filename = 'jornada-export.xls';
 
     // Forward content-type from S3 or default to Excel
     const contentType = fileResponse.headers.get('content-type') || 'application/vnd.ms-excel';
-    const contentLength = fileResponse.headers.get('content-length');
 
-    console.log(`✅ Streaming file: ${filename} (${contentType}, ${contentLength ?? 'unknown'} bytes)`);
+    console.log(`✅ Sending file: ${filename} (${contentType})`);
 
     const headers = {
       'Content-Type': contentType,
       'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': fileSize.toString(),
+      'X-File-MD5': md5Hash,
+      'X-File-SHA256': sha256Hash
     };
-    if (contentLength) {
-      headers['Content-Length'] = contentLength;
-    }
 
-    return new Response(fileResponse.body, {
+    return new Response(fileBuffer, {
       status: 200,
       headers
     });
@@ -224,31 +246,46 @@ async function handleJourneyExport(email, password) {
  * Simple router
  */
 async function handleRequest(req) {
+  const startTime = Date.now();
+  const requestDate = new Date().toISOString();
   const url = new URL(req.url);
+  
+  console.log(`\n📥 [${requestDate}] ${req.method} ${url.pathname}`);
+  
+  let response;
   
   // Health check endpoint
   if (url.pathname === '/health' && req.method === 'GET') {
-    return new Response(JSON.stringify({ status: 'ok' }), {
+    response = new Response(JSON.stringify({ status: 'ok' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
   }
-  
   // Main export endpoint — returns the file binary directly
-  if (url.pathname === '/api/journey-export' && req.method === 'GET') {
+  else if (url.pathname === '/api/journey-export' && req.method === 'GET') {
     const email = req.headers.get('email');
     const password = req.headers.get('password');
-    return handleJourneyExport(email, password);
+    response = await handleJourneyExport(email, password);
+  }
+  // 404 for other routes
+  else {
+    response = new Response(JSON.stringify({
+      success: false,
+      error: 'Not found'
+    }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
   
-  // 404 for other routes
-  return new Response(JSON.stringify({
-    success: false,
-    error: 'Not found'
-  }), {
-    status: 404,
-    headers: { 'Content-Type': 'application/json' }
-  });
+  // Log response details
+  const endTime = Date.now();
+  const duration = endTime - startTime;
+  const responseDate = new Date().toISOString();
+  
+  console.log(`📤 [${responseDate}] Status: ${response.status} | Duration: ${duration}ms`);
+  
+  return response;
 }
 
 // Start the server
