@@ -250,7 +250,15 @@ async function handleRequest(req) {
   const requestDate = new Date().toISOString();
   const url = new URL(req.url);
   
+  // Extract user info from headers (if available)
+  const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
+  const userAgent = req.headers.get('user-agent') || 'unknown';
+  const referer = req.headers.get('referer') || 'none';
+  
   console.log(`\n📥 [${requestDate}] ${req.method} ${url.pathname}`);
+  console.log(`   🌐 IP: ${ip}`);
+  console.log(`   🖥️  User-Agent: ${userAgent}`);
+  console.log(`   🔗 Referer: ${referer}`);
   
   let response;
   
@@ -263,7 +271,6 @@ async function handleRequest(req) {
   }
   // Main export endpoint — returns the file binary directly
   else if (url.pathname === '/api/journey-export' && req.method === 'GET') {
-    const email = req.headers.get('email');
     const password = req.headers.get('password');
     response = await handleJourneyExport(email, password);
   }
