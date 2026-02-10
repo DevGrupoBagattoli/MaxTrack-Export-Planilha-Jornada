@@ -251,11 +251,13 @@ async function handleRequest(req) {
   const url = new URL(req.url);
   
   // Extract user info from headers (if available)
+  const email = req.headers.get('email');
   const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
   const userAgent = req.headers.get('user-agent') || 'unknown';
   const referer = req.headers.get('referer') || 'none';
   
   console.log(`\n📥 [${requestDate}] ${req.method} ${url.pathname}`);
+  if (email) console.log(`   👤 User: ${email}`);
   console.log(`   🌐 IP: ${ip}`);
   console.log(`   🖥️  User-Agent: ${userAgent}`);
   console.log(`   🔗 Referer: ${referer}`);
