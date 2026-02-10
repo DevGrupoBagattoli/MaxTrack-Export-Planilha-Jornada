@@ -145,6 +145,7 @@ async function resolveExportUrl(authData) {
 async function handleJourneyExport(email, password) {
   // Validate request
   if (!email || !password) {
+    console.log(`❌ Missing credentials - email: "${email || 'undefined'}", password: "${password ? '***' : 'undefined'}"`);
     return new Response(JSON.stringify({
       success: false,
       error: 'Email and password are required'
