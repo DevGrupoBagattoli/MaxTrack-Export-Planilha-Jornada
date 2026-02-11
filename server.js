@@ -19,26 +19,25 @@ function calculateHash(data, algorithm = 'sha256') {
 }
 
 /**
- * Get yesterday's date range in ISO format with timezone
+ * Get month-to-date range in ISO format with timezone
  * @returns {Object} { startDate, endDate } in ISO format
  */
-function getYesterdayDateRange() {
+function getMonthToDateRange() {
   const now = new Date();
   
-  // Set to yesterday at 00:00:00
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  yesterday.setHours(0, 0, 0, 0);
+  // Set to first day of current month at 00:00:00
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  firstDayOfMonth.setHours(0, 0, 0, 0);
   
-  // Set to yesterday at 23:59:59
-  const yesterdayEnd = new Date(yesterday);
-  yesterdayEnd.setHours(23, 59, 59, 999);
+  // Set to today at 23:59:59
+  const today = new Date(now);
+  today.setHours(23, 59, 59, 999);
   
   return {
-    startDate: yesterday.toISOString(),
-    endDate: yesterdayEnd.toISOString(),
-    startTimestamp: yesterday.getTime(),
-    endTimestamp: yesterdayEnd.getTime()
+    startDate: firstDayOfMonth.toISOString(),
+    endDate: today.toISOString(),
+    startTimestamp: firstDayOfMonth.getTime(),
+    endTimestamp: today.getTime()
   };
 }
 
@@ -103,19 +102,19 @@ async function pollForCompletion(authData, startTimestamp, endTimestamp) {
 }
 
 /**
- * Resolve the file URL for yesterday's journey export
+ * Resolve the file URL for the journey export
  * @param {Object} authData - Authentication data
  * @returns {Promise<string>} The S3 file URL
  */
 async function resolveExportUrl(authData) {
-  // Get yesterday's date range (for the data export)
-  const { startDate, endDate } = getYesterdayDateRange();
+  // Get month-to-date date range (for the data export)
+  const { startDate, endDate } = getMonthToDateRange();
 
   // Create a timestamp range for finding the PROCESS (created today)
   const processSearchStart = Date.now() - (2 * 60 * 60 * 1000); // 2 hours ago
   const processSearchEnd = Date.now() + (5 * 60 * 1000); // 5 minutes in future to account for clock skew
 
-  // Check if process already exists (created recently for yesterday's data)
+  // Check if process already exists (created recently for month-to-date data)
   const processListResult = await listProcesses(authData);
   const existingProcess = findProcessByNameAndDate(
     processListResult.list,
@@ -138,7 +137,7 @@ async function resolveExportUrl(authData) {
     }
   }
 
-  // Trigger new export for yesterday
+  // Trigger new export for month-to-date
   await exportJourney(authData, startDate, endDate);
 
   // Poll until completion
@@ -199,7 +198,8 @@ async function handleJourneyExport(email, password) {
     console.log(`🔐 File SHA256: ${sha256Hash}`);
 
     // Derive a filename from the URL or use a default
-    const filename = 'jornada-export.xls';
+    const today = new Date().toISOString().split('T')[0];
+    const filename = `jornada-export-${today}.xlsx`;
 
     // Forward content-type from S3 or default to Excel
     const contentType = fileResponse.headers.get('content-type') || 'application/vnd.ms-excel';
